@@ -1,0 +1,26 @@
+quiet=0
+while getopts ":hq" opt; do
+  case ${opt} in
+    q )
+      quiet=1
+      ;;
+    h )
+      echo "Usage: svgray [-q] FILE"
+      ;;
+  esac
+done
+for i in $@; do :; done
+if [ $# -eq 0 ]
+  then
+    echo "Usage: svgray [-q] FILE"
+  else
+    tempfile=$(mktemp)
+    python3 $(dirname $0)/.svgray.py $i > $tempfile || { echo "failed to convert to grayscale"; exit 1; }
+    svgo --quiet --pretty $tempfile || { echo "failed to optimize"; exit 1; }
+    mv $tempfile $i || { echo "failed to write"; exit 1; }
+    if [[ $quiet = 0 ]]
+      then
+        echo "Wrote to $i."
+    fi
+    exit 0
+fi
