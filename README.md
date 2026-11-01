@@ -5,6 +5,11 @@ The replacement uses a simple regex so if you have text containing SVG color cod
 
 Note: the script does not currently handle _named_ colors; that's planned for the future.
 
+`rgb()`, `rgba()`, `hsl()` and `hsla()` values are parsed as plain numbers (commas or spaces, percentages, `deg`, `/` alpha). Values that can't be parsed are left unchanged. SVG content is never evaluated as code, so it is safe to run on untrusted files.
+
+## Tests
+`python3 -m unittest test_svgray`
+
 ## Installation
 - Make sure `python3` is in your `PATH`
 - Put `svgray` and `.svgray.py` in the same directory somewhere in your `PATH` or wherever you intend to use it

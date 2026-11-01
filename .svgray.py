@@ -12,6 +12,34 @@ colors_func = re.compile(colors_func_str, re.IGNORECASE)
 colors = re.compile(colors_hex_str + r"|" + colors_func_str, re.IGNORECASE)
 
 
+_number = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?(%|deg)?", re.IGNORECASE)
+
+
+def _parse_func_args(color: str) -> list:
+    """Parse the arguments of rgb()/rgba()/hsl()/hsla() as plain numbers.
+
+    Accepts comma- or space-separated values, percentages, a "deg" unit on the
+    hue and a "/" before alpha. Anything else raises ValueError. The arguments
+    come from the SVG being converted, which may be untrusted, so they must
+    never be evaluated as Python code.
+    """
+    inner = color[color.index('(') + 1:color.rindex(')')]
+    values = []
+    for part in re.split(r"[\s,/]+", inner.strip()):
+        if not part:
+            continue
+        m = _number.fullmatch(part)
+        if m is None:
+            raise ValueError(f'bad color "{color}"')
+        number = float(part[:m.start(1)] if m.group(1) else part)
+        values.append((number, (m.group(1) or '').lower()))
+    return values
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
 def parse_color_to_rgb(color: str) -> Tuple[float, float, float, float, str]:
     a = None
     if colors_hex.match(color) is not None:
@@ -28,18 +56,21 @@ def parse_color_to_rgb(color: str) -> Tuple[float, float, float, float, str]:
         r, g = divmod(rg, 256)
     elif colors_func.match(color) is not None:
         kind = 'func'
-        values = eval(color[color.index('('):])
-        if color[3] == 'a':
-            assert len(values) == 4, 'rgba/hsla'
+        values = _parse_func_args(color)
+        if color[3] == 'a' or len(values) == 4:
+            if len(values) != 4:
+                raise ValueError(f'bad color "{color}": rgba/hsla need 4 values')
+        elif len(values) != 3:
+            raise ValueError(f'bad color "{color}": rgb/hsl need 3 values')
+        if color.lower().startswith('rgb'):
+            r, g, b = (_clamp(v * 2.55 if unit == '%' else v, 0, 255) for v, unit in values[:3])
         else:
-            assert len(values) == 3, 'rgb/hsl'
-        if color.startswith('rgb'):
-            r, g, b = values[:3]
-        else:
-            h, s, l = values[:3]
-            r, g, b = colorsys.hls_to_rgb(h, l, s)
+            (h, _), (s, _), (l, _) = values[:3]
+            r, g, b = (c * 255 for c in colorsys.hls_to_rgb(
+                (h % 360) / 360, _clamp(l, 0, 100) / 100, _clamp(s, 0, 100) / 100))
         if len(values) == 4:
-            a = values[3]
+            alpha, unit = values[3]
+            a = _clamp(alpha / 100 if unit == '%' else alpha, 0, 1)
     else:
         assert colors.match(color) is None
         raise ValueError(f'bad color "{color}"')
@@ -57,7 +88,10 @@ def colmod(r, g, b):
 
 
 def convert(color):
-    r, g, b, a, kind = parse_color_to_rgb(color)
+    try:
+        r, g, b, a, kind = parse_color_to_rgb(color)
+    except ValueError:
+        return color  # leave colors we can't parse untouched
     ig = colmod(r, g, b)
     if kind == 'hex6':
         return '#%02x%02x%02x' % (ig, ig, ig)
